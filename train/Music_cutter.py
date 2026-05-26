@@ -1,58 +1,81 @@
-import soundfile as sf
-import numpy as np
+"""
+Splits full-song audio and label files into sentence-level segments for training.
+
+Usage
+-----
+Run from the ``train/`` directory:
+    python Music_cutter.py
+
+Expected layout::
+
+    train/
+    ├── labels/      # ground-truth JSON label files
+    ├── songs/       # full-song WAV files
+    ├── new-labels/  # output: sentence-level JSON labels  (created beforehand)
+    └── new-songs/   # output: sentence-level WAV clips    (created beforehand)
+"""
+
 import json
+import logging
 import os
 
-files = os.listdir("labels")
+import numpy as np
+import soundfile as sf
 
-file_ids = [f.split(".")[0] for f in files]
-file_ids = filter(lambda x: len(x) > 0, file_ids)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
 
 LABEL_PATH = "labels"
 SONGS_PATH = "songs"
-
 NEW_LABEL_PATH = "new-labels"
 NEW_SONGS_PATH = "new-songs"
 
-def get_audio_segment(audiodata, samplerate, start_ms, end_ms):
-    d = audiodata[int(start_ms / 1000*samplerate):int(end_ms / 1000*samplerate)]
-    return d
 
-for file_id in file_ids:
-    # Read label file
-    label_file = os.path.join(LABEL_PATH, file_id + ".json")
-    label_data = json.load(open(label_file, encoding='utf-8'))
-    
-    # Read audio file
-    sound_file = os.path.join(SONGS_PATH, file_id + ".wav")
-    audiodata, samplerate = sf.read(sound_file)
-    audiodata = np.mean(audiodata, axis=1)
-    
-    # Break segment into sentences
-    for i, sent_label in enumerate(label_data):
-        # Original start offset (in ms) of this sentence
-        orig_start = sent_label["s"]
-        new_label = {"orig_s": orig_start, "l": []}
-        
-        sent_text = []
-        for tok in sent_label["l"]:
-            new_tok = {
-                "s": tok["s"] - orig_start,
-                "e": tok["e"] - orig_start,
-                "d": tok["d"].lower()
+def get_audio_segment(
+    audiodata: np.ndarray,
+    samplerate: int,
+    start_ms: float,
+    end_ms: float,
+) -> np.ndarray:
+    """Extract the audio slice between ``start_ms`` and ``end_ms`` milliseconds."""
+    start = int(start_ms / 1000 * samplerate)
+    end = int(end_ms / 1000 * samplerate)
+    return audiodata[start:end]
+
+
+def main() -> None:
+    file_ids = [f.split(".")[0] for f in os.listdir(LABEL_PATH) if f]
+
+    for file_id in file_ids:
+        with open(os.path.join(LABEL_PATH, file_id + ".json"), encoding="utf-8") as f:
+            label_data = json.load(f)
+
+        audiodata, samplerate = sf.read(os.path.join(SONGS_PATH, file_id + ".wav"))
+        if audiodata.ndim == 2:
+            audiodata = np.mean(audiodata, axis=1)
+
+        for i, sent_label in enumerate(label_data):
+            orig_start = sent_label["s"]
+            new_label = {
+                "orig_s": orig_start,
+                "l": [
+                    {
+                        "s": tok["s"] - orig_start,
+                        "e": tok["e"] - orig_start,
+                        "d": tok["d"].lower(),
+                    }
+                    for tok in sent_label["l"]
+                ],
             }
-            sent_text.append(tok["d"])
-            new_label["l"].append(new_tok)
-        
-        # Dump new label for this sentence
-        with open(os.path.join(NEW_LABEL_PATH, file_id + "-" + str(i) + ".json"), "wt") as f:
-            f.write(json.dumps(new_label))
-        
-        # Dump new audio data
-        sent_audiodata = get_audio_segment(audiodata, samplerate, sent_label["s"], sent_label["e"])
 
-        sf.write(
-            file=os.path.join(NEW_SONGS_PATH, file_id + "-" + str(i) + ".wav"),
-            data=sent_audiodata,
-            samplerate=samplerate
-        )
+            with open(os.path.join(NEW_LABEL_PATH, f"{file_id}-{i}.json"), "w", encoding="utf-8") as f:
+                json.dump(new_label, f)
+
+            sent_audio = get_audio_segment(audiodata, samplerate, sent_label["s"], sent_label["e"])
+            sf.write(os.path.join(NEW_SONGS_PATH, f"{file_id}-{i}.wav"), sent_audio, samplerate)
+
+        logger.info("Processed %s (%d sentences)", file_id, len(label_data))
+
+
+if __name__ == "__main__":
+    main()
