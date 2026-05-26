@@ -1,0 +1,17 @@
+# Core ML / audio
+torch>=1.13.0
+transformers==4.17.0
+datasets>=1.18.0
+huggingface-hub>=0.4.0
+
+# Audio I/O and processing
+soundfile>=0.10.3
+librosa>=0.9.0
+numpy>=1.21.0
+
+# Beam-search decoder (language model integration)
+pyctcdecode==0.1.0
+# kenlm must be installed from source: pip install https://github.com/kpu/kenlm/archive/master.zip
+
+# Evaluation
+jiwer>=2.3.0
